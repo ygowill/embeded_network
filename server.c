@@ -43,7 +43,7 @@ void main(int argc ,char **argv){
     bzero(&server, sizeof(server));
     server.sin_family = AF_INET;
     server.sin_port = htons(PORT);
-    server.sin_addr.s_addr = htonl(INADDR_ANY);
+    server.sin_addr.s_addr = htonl("127.0.0.1");
 
     if (bind(listenfd, (struct sockaddr *)&server, sizeof(struct sockaddr)) == -1){
         perror("Bind error.\n");
