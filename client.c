@@ -1,46 +1,67 @@
-#include<stdlib.h>
-#include<stdio.h>
-#include<string.h>
-#include<netdb.h>
 #include<sys/types.h>
-#include<netinet/in.h>
 #include<sys/socket.h>
 #include<unistd.h>
+#include<netinet/in.h>
 #include<arpa/inet.h>
+#include<stdio.h>
+#include<stdlib.h>
+#include<string.h>
+#include<sys/wait.h>
+#include<strings.h>
 #include<errno.h>
+#include<poll.h>
+#define IPADDRESS "127.0.0.1"
+#define PORT 6666
+#define MAXLINE 1024
+#define max(a, b) (a>b)?a:b
+static void handle_connection(int sockfd);
 
-#define PORT 23333
+int main(int argc, char* argv[]){
+    int connfd = 0;
+    int clen = 0;
+    struct sockaddr_in client;
+    client.sin_family = AF_INET;
+    client.sin_port = htons(PORT);
+    client.sin_addr.s_addr = inet_addr(IPADDRESS);
+    connfd = socket(AF_INET, SOCK_STREAM, 0);
+    if(connfd<0){
+        perror("socket");
+        return -1;
+    }
+    if(connect(connfd, (struct sockaddr*)&client, sizeof(client))<0){
+        perror("connect");
+        return -1;
+    }
+    handle_connection(connfd);
+    return 0;
+}
 
-int main(int argc,char *argv[])
-{
-    int sockfd;
-    char sendbuffer[200];
-    char recvbuffer[200];
-    struct sockaddr_in server_addr;
-    if((sockfd=socket(AF_INET,SOCK_STREAM,0))==-1)
-    {
-        fprintf(stderr,"Socket Error:%s\a\n",strerror(errno));
-        exit(1);
+static void handle_connection(int sockfd){
+    char sendline[MAXLINE], recvline[MAXLINE];
+    int maxfdp, stdineof;
+    struct pollfd pfds[2];
+    int n;
+    pfds[0].fd = sockfd;
+    pfds[0].events = POLLIN;
+    pfds[1].fd = STDIN_FILENO;
+    pfds[1].events = POLLIN;
+    while(1){
+        poll(pfds, 2, -1);
+        if(pfds[0].revents & POLLIN){
+            n = read(sockfd, recvline, MAXLINE);
+            if(n == 0){
+                fprintf(stderr, "client: server is closed.\n");
+                close(sockfd);
+            }
+            write(STDOUT_FILENO, recvline, n);
+        }
+        if(pfds[1].revents & POLLIN){
+            n = read(STDIN_FILENO, sendline, MAXLINE);
+            if(n == 0){
+                shutdown(sockfd, SHUT_WR);
+                continue;
+            }
+            write(sockfd, sendline, n);
+        }
     }
-    bzero(&server_addr,sizeof(server_addr));
-    server_addr.sin_family=AF_INET;
-    server_addr.sin_port=htons(PORT);
-    server_addr.sin_addr.s_addr=htonl("127.0.0.1");
-    if(connect(sockfd,(struct sockaddr *)(&server_addr),sizeof(struct sockaddr))==-1){
-        fprintf(stderr,"Connect error:%s\n",strerror(errno));
-        exit(1);
-    }
-    while(1)
-    {
-        printf("Please input your word:\n");
-        scanf("%s",sendbuffer);
-        printf("\n");
-        if(strcmp(sendbuffer,"quit")==0)
-            break;
-        send(sockfd,sendbuffer,sizeof(sendbuffer),0);
-        recv(sockfd,recvbuffer,200,0);
-        printf("recv data :%s\n",recvbuffer);
-    }
-    close(sockfd);
-    exit(0);
 }

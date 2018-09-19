@@ -1,145 +1,121 @@
-#include <stdio.h>
-#include <string.h>
-#include <unistd.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <sys/time.h>
-#include <stdlib.h>
+#include<sys/types.h>
+#include<sys/socket.h>
+#include<unistd.h>
+#include<netinet/in.h>
+#include<arpa/inet.h>
+#include<stdio.h>
+#include<stdlib.h>
+#include<string.h>
+#include<sys/wait.h>
+#include<strings.h>
+#include<errno.h>
+#include<poll.h>
 
-#define PORT 23333
-#define BACKLOG 5
-#define MAXDATASIZE 1024
+#define IPADDRESS "127.0.0.1"
+#define PORT 6666
+#define MAXLINE 1024
+#define LISTENQ 5
+#define OPEN_MAX 1000
+#define INFTIM -1
 
-typedef struct _CLIENT
-{
-  int fd;
-  char name[100];
-  struct sockaddr_in addr;
-  char data[MAXDATASIZE];
-} CLIENT;
+int bind_and_listen(){
+    int serverfd;
+    struct sockaddr_in my_addr;
+    unsigned int sin_size;
+    if((serverfd = socket(AF_INET, SOCK_STREAM, 0)) == -1){
+        perror("socket");
+        return -1;
+    }
+    printf("socket ok\n");
+    my_addr.sin_family = AF_INET;
+    my_addr.sin_port = htons(PORT);
+    my_addr.sin_addr.s_addr = INADDR_ANY;
+    bzero(&(my_addr.sin_zero), 0);
+    if(bind(serverfd, (struct sockaddr*)&my_addr, sizeof(struct sockaddr)) == -1){
+        perror("bind");
+        return -2;
+    }
+    printf("bind ok\n");
+    if(listen(serverfd, LISTENQ) == -1){
+        perror("listen");
+        return -3;
+    }
+    printf("listen ok\n");
+    return serverfd;
+}
 
-void main(int argc ,char **argv){
-    printf("start initialization...\n");
-    int conn_num, max_conn, maxfd, sockfd;
+void do_poll(int listenfd){
+    int connfd, sockfd;
+    struct sockaddr_in cliaddr;
+    socklen_t cliaddrlen;
+    struct pollfd clientfds[OPEN_MAX];
+    int maxi;
+    int i;
     int nready;
-    fd_set rset, allset;
-    int listenfd, connectfd;
-    struct sockaddr_in server;
-    CLIENT client[FD_SETSIZE];
-    char recv_buf[MAXDATASIZE];
-    char send_buf[MAXDATASIZE];
-    int sin_size;
+    clientfds[0].fd = listenfd;
+    clientfds[0].events = POLLIN;
+    for(i = 1; i<OPEN_MAX; i++)
+        clientfds[i].fd = -1;
+    maxi = 0;
 
-    if ((listenfd = socket(AF_INET, SOCK_STREAM, 0)) == -1){
-        perror("Creating socket failed.\n");
-        exit(1);
-    }
-
-    int opt = SO_REUSEADDR;
-    setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-
-    bzero(&server, sizeof(server));
-    server.sin_family = AF_INET;
-    server.sin_port = htons(PORT);
-    server.sin_addr.s_addr = htonl("127.0.0.1");
-
-    if (bind(listenfd, (struct sockaddr *)&server, sizeof(struct sockaddr)) == -1){
-        perror("Bind error.\n");
-        exit(1);
-    }
-
-    if (listen(listenfd, BACKLOG) == -1){
-        perror("listen() error\n");
-        exit(1);
-    }
-
-    //初始化select   
-    maxfd = listenfd;
-    max_conn = -1;
-    for (conn_num = 0; conn_num < FD_SETSIZE; conn_num++){
-        client[conn_num].fd = -1;
-    }
-    FD_ZERO(&allset);
-    FD_SET(listenfd, &allset);  //将监听socket加入select检测的描述符集合
-    FD_SET(STDIN_FILENO, &allset);  //将标准输入加入select检测的描述符集合
-
-    printf("server ready.\n");
-    int flag=1;
-    while (flag){
-        struct sockaddr_in addr;
-        rset = allset;
-        nready = select(maxfd + 1, &rset, NULL, NULL, NULL);    //调用select   
-        printf("Select() break and the return num is %d. \n", nready);
-
-        if (FD_ISSET(listenfd, &rset)){
-            printf("Accept a connection.\n");
-            //调用accept，返回服务器与客户端连接的socket描述符   
-            sin_size = sizeof(struct sockaddr_in);
-            if ((connectfd = accept(listenfd, (struct sockaddr *)&addr, (socklen_t *) & sin_size)) == -1){
-                perror("Accept() error\n");
-                continue;
-            }
-
-            //将新客户端的加入数组   
-            for (conn_num = 0; conn_num < FD_SETSIZE; conn_num++){
-                if (client[conn_num].fd < 0){
-                    char buffer[20];
-                    client[conn_num].fd = connectfd;   //保存客户端描述符
-                    memset(buffer, '0', sizeof(buffer));
-                    sprintf(buffer, "Client[%.2d]", conn_num);
-                    memcpy(client[conn_num].name, buffer, strlen(buffer));
-                    client[conn_num].addr = addr;
-                    memset(buffer, '0', sizeof(buffer));
-                    sprintf(buffer, "Only For Test!");
-                    memcpy(client[conn_num].data, buffer, strlen(buffer));
-                    printf("Got a connection from %s:%d.\n", inet_ntoa(client[conn_num].addr.sin_addr),ntohs(client[conn_num].addr.sin_port));
-                    printf("Add a new connection:%s\n",client[conn_num].name);
-                    break;
-                }
-            }
-
-            if (conn_num == FD_SETSIZE)
-                printf("Too many clients\n");
-            FD_SET(connectfd, &allset);
-
-            maxfd = connectfd > maxfd ? connectfd : maxfd;
-            max_conn = conn_num > max_conn ? conn_num : max_conn;
-
-            if (--nready <= 0)
-                continue;
+    while(1){
+        nready = poll(clientfds, maxi+1, INFTIM);
+        if(nready == -1){
+            perror("poll error:");
+            exit(1);
         }
-
-        if(FD_ISSET(STDIN_FILENO, &rset)){
-            fgets(send_buf,MAXDATASIZE,stdin);
-            send_buf[strlen(send_buf)-1]='\0';
-            sendto(listenfd,send_buf,strlen(send_buf),0,
-                   (struct sockaddr *)&server,sizeof(server));
-        }
-
-        for (conn_num = 0; conn_num <= max_conn; conn_num++){
-            if ((sockfd = client[conn_num].fd) < 0)
-                continue;
-            if (FD_ISSET(sockfd, &rset)){
-                printf("Receive from connect fd[%d].\n", conn_num);
-                if(!recv(sockfd, recv_buf, MAXDATASIZE, 0)){
-                    close(sockfd);  //关闭socket连接   
-                    printf("%s closed. User's data: %s\n", client[conn_num].name, client[conn_num].data);
-                    FD_CLR(sockfd, &allset);
-                    client[conn_num].fd = -1;
-                }
+        if(clientfds[0].revents & POLLIN){
+            cliaddrlen = sizeof(cliaddr);
+            if((connfd = accept(listenfd, (struct sockaddr*)&cliaddr, &cliaddrlen)) == -1){
+                if(errno == EINTR)
+                    continue;
                 else{
-                    if(strcmp(recv_buf,"stop server")==0){
-                        flag = 0;
-                        break;
-                    }
-                    printf("client( %s ) >>> %s\n", &client[conn_num], recv_buf);
+                    perror("accept error:");
+                    exit(1);
                 }
-                if (--nready <= 0)
+            }
+            fprintf(stdout, "accept a new client:%s:%d\n", inet_ntoa(cliaddr.sin_addr), cliaddr.sin_port);
+            for(i = 1; i<OPEN_MAX; i++){
+                if(clientfds[i].fd<0){
+                    clientfds[i].fd = connfd;
                     break;
+                }
+            }
+            if(i == OPEN_MAX){
+                fprintf(stderr, "too many clients.\n");
+                exit(1);
+            }
+            clientfds[i].events = POLLIN;
+            maxi = (i>maxi?i:maxi);
+            if(--nready<=0)   //当前准备好的只有serverfd
+                continue;
+        }
+
+        char buf[MAXLINE];
+        memset(buf, 0, MAXLINE);
+        int readlen = 0;
+        for(i = 1; i<maxi; i++){
+            if(clientfds[i].fd<0)
+                continue;
+            if(clientfds[i].revents & POLLIN){
+                readlen = read(clientfds[i].fd, buf, MAXLINE);
+                if(readlen == 0){
+                    close(clientfds[i].fd);
+                    clientfds[i].fd = -1;
+                    continue;
+                }
+                printf("msg is:");
+                write(STDOUT_FILENO, buf, readlen);
+                write(clientfds[i].fd, buf, readlen);
             }
         }
     }
-    close(listenfd);
+}
+int main(int argc, char* argv[]){
+    int listenfd = bind_and_listen();
+    if(listenfd<0){
+        return 0;
+    }
+    do_poll(listenfd);
+    return 0;
 }
