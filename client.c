@@ -1,125 +1,87 @@
-#include<netinet/in.h>
-#include<sys/socket.h>
-#include<stdio.h>
-#include<string.h>
-#include<stdlib.h>
-#include<sys/epoll.h>
-#include<time.h>
-#include<sys/types.h>
-#include<arpa/inet.h>
-#include<errno.h>
-#include<unistd.h>
-
-#define MAXSIZE 1024
-#define IPADDRESS "127.0.0.1"
-#define SERV_PORT 6666
-#define FDSIZE 1024
-#define EPOLLEVENTS 20
-
-void handle_connection(int sockfd);
-void handle_events(int epollfd, struct epoll_event* events, int num, int sockfd, char* buf);
-void do_read(int epollfd, int fd, int sockfd, char* buf);
-void do_write(int epollfd, int fd, int sockfd, char* buf);
-void add_event(int epollfd, int fd, int state);
-void delete_event(int epollfd, int fd, int state);
-void modify_event(int epollfd, int fd, int state);
-int count = 0;
-int main(int argc, char* argv[]){
-    int sockfd;
-    struct sockaddr_in servaddr;
-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    bzero(&servaddr, sizeof(servaddr));
-    servaddr.sin_family = AF_INET;
-    servaddr.sin_port = htons(SERV_PORT);
-    inet_pton(AF_INET, IPADDRESS, &servaddr.sin_addr);
-    connect(sockfd, (struct sockaddr*)&servaddr, sizeof(servaddr));
-    handle_connection(sockfd);
-    close(sockfd);
-    return 0;
-}
-
-void handle_connection(int sockfd){
-    int epollfd;
-    struct epoll_event events[EPOLLEVENTS];
-    char buf[MAXSIZE];
+#include <stdlib.h>
+#include <stdio.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <string.h>
+#include <netinet/in.h>
+#include <sys/select.h>
+#include <sys/time.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#define RET_VAL(VAL,FUNC_NAME) do{\
+                    if(VAL < 0) \
+                    {\
+                        perror(#FUNC_NAME);\
+                        exit(-1);\
+                    }\
+                }\
+                while(0)
+int main(int argc, char * argv[]) {
+    int sock_fd;
+    int client_fd;
     int ret;
-    epollfd = epoll_create(FDSIZE);
-    add_event(epollfd, STDIN_FILENO, EPOLLIN);
-    while(1){
-        ret = epoll_wait(epollfd, events, EPOLLEVENTS, -1);
-        handle_events(epollfd, events, ret, sockfd, buf);
-    }
-    close(epollfd);
-}
+    struct timeval timeout;
+    fd_set readfdset;
+    struct sockaddr_in addr;
+    struct sockaddr_in clientaddr;
+    struct in_addr inaddr;
+    int addrlen = sizeof(clientaddr);
+    char message[200];
+    char *sendstr = "hello client\n";
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(3456);
+    ret = inet_aton("127.0.0.1", &inaddr);
+    RET_VAL(ret, inet_aton);
+    addr.sin_addr = inaddr;
 
-void handle_events(int epollfd, struct epoll_event* events, int num, int sockfd, char* buf){
-    int fd, i;
-    for(i = 0; i<num; i++){
-        fd = events[i].data.fd;
-        if(events[i].events & EPOLLIN)
-            do_read(epollfd, fd, sockfd, buf);
-        else if(events[i].events & EPOLLOUT)
-            do_write(epollfd, fd, sockfd, buf);
-    }
-}
+    sock_fd = socket(AF_INET, SOCK_STREAM, 0);
 
-void do_read(int epollfd, int fd, int sockfd, char* buf){
-    int nread;
-    nread = read(fd, buf, MAXSIZE);
-    if(nread == -1){
-        perror("read error:");
-        close(fd);
-    }
-    else if(nread == 0){
-        fprintf(stderr, "server close.\n");
-        close(fd);
-    }
-    else{
-        if(fd == STDIN_FILENO)
-            add_event(epollfd, sockfd, EPOLLOUT);
-        else{
-            delete_event(epollfd, sockfd, EPOLLIN);
-            add_event(epollfd, STDOUT_FILENO, EPOLLOUT);
+    ret = connect(sock_fd, (struct sockaddr *) &addr, sizeof(addr));
+    RET_VAL(ret, connect);
+    bzero(message, sizeof(message));
+//    ret = recv(client_fd,message,sizeof(message),0);
+//    RET_VAL(ret,recv);
+//    printf("%s",message);
+    while (1) {
+        timeout.tv_sec = 5;
+        timeout.tv_usec = 5000000;
+        FD_ZERO(&readfdset);
+        FD_SET(sock_fd, &readfdset);
+        FD_SET(0, &readfdset);
+        ret = select(sock_fd + 1, &readfdset, NULL, NULL, &timeout);
+        if (ret < 0) {
+            perror("select");
+        } else if (0 == ret) {
+            printf("time is over\n");
+        } else {
+            if (FD_ISSET(0, &readfdset)) {
+                printf("select ok\n");
+                ret = read(0, message, sizeof(message));
+                if (ret < 0) {
+                    perror("read");
+                }
+                send(sock_fd, message, strlen(message), 0);
+                if (0 == strncmp(message, "close", 5)) {
+                    break;
+                }
+            }
+            if (FD_ISSET(sock_fd, &readfdset)) {
+                ret = recv(sock_fd, message, sizeof(message), 0);
+                if (0 == ret) {
+                    printf("server not in work\n");
+                    break;
+                } else {
+                    message[ret] = '\0';
+                    printf("recv:%s\n", message);
+                }
+            }
         }
     }
-}
+    ret = send(sock_fd, sendstr, strlen(sendstr), 0);
+    RET_VAL(ret, send);
+    printf("send string success\n");
 
-void do_write(int epollfd, int fd, int sockfd, char* buf){
-    int nwrite;
-    char temp[100];
-    buf[strlen(buf)-1] = '\0';
-    snprintf(temp, sizeof(temp), "%s_%02d\n", buf, count++);
-    nwrite = write(fd, temp, strlen(temp));
-    if(nwrite == -1){
-        perror("write error:");
-        close(fd);
-    }
-    else{
-        if(fd == STDOUT_FILENO)
-            delete_event(epollfd, fd, EPOLLOUT);
-        else
-            modify_event(epollfd, fd, EPOLLIN);
-    }
-    memset(buf, 0, MAXSIZE);
-}
-
-void add_event(int epollfd, int fd,int state){
-    struct epoll_event ev;
-    ev.events = state;
-    ev.data.fd = fd;
-    epoll_ctl(epollfd, EPOLL_CTL_ADD, fd, &ev);
-}
-
-void delete_event(int epollfd, int fd, int state){
-    struct epoll_event ev;
-    ev.events = state;
-    ev.data.fd = fd;
-    epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, &ev);
-}
-
-void modify_event(int epollfd, int fd, int state){
-    struct epoll_event ev;
-    ev.events = state;
-    ev.data.fd = fd;
-    epoll_ctl(epollfd, EPOLL_CTL_MOD, fd, &ev);
+//    ret = recv(sock_fd,message,sizeof(message),0);
+//    printf("recv from ser:%s",message);
+    close(sock_fd);
 }
