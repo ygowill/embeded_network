@@ -1,67 +1,125 @@
-#include<sys/types.h>
-#include<sys/socket.h>
-#include<unistd.h>
 #include<netinet/in.h>
-#include<arpa/inet.h>
+#include<sys/socket.h>
 #include<stdio.h>
-#include<stdlib.h>
 #include<string.h>
-#include<sys/wait.h>
-#include<strings.h>
+#include<stdlib.h>
+#include<sys/epoll.h>
+#include<time.h>
+#include<sys/types.h>
+#include<arpa/inet.h>
 #include<errno.h>
-#include<poll.h>
-#define IPADDRESS "127.0.0.1"
-#define PORT 6666
-#define MAXLINE 1024
-#define max(a, b) (a>b)?a:b
-static void handle_connection(int sockfd);
+#include<unistd.h>
 
+#define MAXSIZE 1024
+#define IPADDRESS "127.0.0.1"
+#define SERV_PORT 6666
+#define FDSIZE 1024
+#define EPOLLEVENTS 20
+
+void handle_connection(int sockfd);
+void handle_events(int epollfd, struct epoll_event* events, int num, int sockfd, char* buf);
+void do_read(int epollfd, int fd, int sockfd, char* buf);
+void do_write(int epollfd, int fd, int sockfd, char* buf);
+void add_event(int epollfd, int fd, int state);
+void delete_event(int epollfd, int fd, int state);
+void modify_event(int epollfd, int fd, int state);
+int count = 0;
 int main(int argc, char* argv[]){
-    int connfd = 0;
-    int clen = 0;
-    struct sockaddr_in client;
-    client.sin_family = AF_INET;
-    client.sin_port = htons(PORT);
-    client.sin_addr.s_addr = inet_addr(IPADDRESS);
-    connfd = socket(AF_INET, SOCK_STREAM, 0);
-    if(connfd<0){
-        perror("socket");
-        return -1;
-    }
-    if(connect(connfd, (struct sockaddr*)&client, sizeof(client))<0){
-        perror("connect");
-        return -1;
-    }
-    handle_connection(connfd);
+    int sockfd;
+    struct sockaddr_in servaddr;
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    bzero(&servaddr, sizeof(servaddr));
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_port = htons(SERV_PORT);
+    inet_pton(AF_INET, IPADDRESS, &servaddr.sin_addr);
+    connect(sockfd, (struct sockaddr*)&servaddr, sizeof(servaddr));
+    handle_connection(sockfd);
+    close(sockfd);
     return 0;
 }
 
-static void handle_connection(int sockfd){
-    char sendline[MAXLINE], recvline[MAXLINE];
-    int maxfdp, stdineof;
-    struct pollfd pfds[2];
-    int n;
-    pfds[0].fd = sockfd;
-    pfds[0].events = POLLIN;
-    pfds[1].fd = STDIN_FILENO;
-    pfds[1].events = POLLIN;
+void handle_connection(int sockfd){
+    int epollfd;
+    struct epoll_event events[EPOLLEVENTS];
+    char buf[MAXSIZE];
+    int ret;
+    epollfd = epoll_create(FDSIZE);
+    add_event(epollfd, STDIN_FILENO, EPOLLIN);
     while(1){
-        poll(pfds, 2, -1);
-        if(pfds[0].revents & POLLIN){
-            n = read(sockfd, recvline, MAXLINE);
-            if(n == 0){
-                fprintf(stderr, "client: server is closed.\n");
-                close(sockfd);
-            }
-            write(STDOUT_FILENO, recvline, n);
-        }
-        if(pfds[1].revents & POLLIN){
-            n = read(STDIN_FILENO, sendline, MAXLINE);
-            if(n == 0){
-                shutdown(sockfd, SHUT_WR);
-                continue;
-            }
-            write(sockfd, sendline, n);
+        ret = epoll_wait(epollfd, events, EPOLLEVENTS, -1);
+        handle_events(epollfd, events, ret, sockfd, buf);
+    }
+    close(epollfd);
+}
+
+void handle_events(int epollfd, struct epoll_event* events, int num, int sockfd, char* buf){
+    int fd, i;
+    for(i = 0; i<num; i++){
+        fd = events[i].data.fd;
+        if(events[i].events & EPOLLIN)
+            do_read(epollfd, fd, sockfd, buf);
+        else if(events[i].events & EPOLLOUT)
+            do_write(epollfd, fd, sockfd, buf);
+    }
+}
+
+void do_read(int epollfd, int fd, int sockfd, char* buf){
+    int nread;
+    nread = read(fd, buf, MAXSIZE);
+    if(nread == -1){
+        perror("read error:");
+        close(fd);
+    }
+    else if(nread == 0){
+        fprintf(stderr, "server close.\n");
+        close(fd);
+    }
+    else{
+        if(fd == STDIN_FILENO)
+            add_event(epollfd, sockfd, EPOLLOUT);
+        else{
+            delete_event(epollfd, sockfd, EPOLLIN);
+            add_event(epollfd, STDOUT_FILENO, EPOLLOUT);
         }
     }
+}
+
+void do_write(int epollfd, int fd, int sockfd, char* buf){
+    int nwrite;
+    char temp[100];
+    buf[strlen(buf)-1] = '\0';
+    snprintf(temp, sizeof(temp), "%s_%02d\n", buf, count++);
+    nwrite = write(fd, temp, strlen(temp));
+    if(nwrite == -1){
+        perror("write error:");
+        close(fd);
+    }
+    else{
+        if(fd == STDOUT_FILENO)
+            delete_event(epollfd, fd, EPOLLOUT);
+        else
+            modify_event(epollfd, fd, EPOLLIN);
+    }
+    memset(buf, 0, MAXSIZE);
+}
+
+void add_event(int epollfd, int fd,int state){
+    struct epoll_event ev;
+    ev.events = state;
+    ev.data.fd = fd;
+    epoll_ctl(epollfd, EPOLL_CTL_ADD, fd, &ev);
+}
+
+void delete_event(int epollfd, int fd, int state){
+    struct epoll_event ev;
+    ev.events = state;
+    ev.data.fd = fd;
+    epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, &ev);
+}
+
+void modify_event(int epollfd, int fd, int state){
+    struct epoll_event ev;
+    ev.events = state;
+    ev.data.fd = fd;
+    epoll_ctl(epollfd, EPOLL_CTL_MOD, fd, &ev);
 }
