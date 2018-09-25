@@ -44,8 +44,6 @@ int main(int argc, char * argv[]) {
         ret = select(sock_fd + 1, &readfdset, NULL, NULL, &timeout);
         if (ret < 0) {
             perror("select");
-        } else if (0 == ret) {
-            //printf("time is over\n");
         } else {
             if (FD_ISSET(0, &readfdset)) {
                 ret = read(0, message, sizeof(message));
@@ -53,7 +51,8 @@ int main(int argc, char * argv[]) {
                     perror("read");
                 }
                 send(sock_fd, message, strlen(message), 0);
-                if (0 == strncmp(message, "close", 5)) {
+                if (0 == strncmp(message, "exit", 4)) {
+                    printf("receive exit message from server\n");
                     break;
                 }
             }

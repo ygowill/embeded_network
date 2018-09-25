@@ -33,7 +33,7 @@ int main(int argc, char * argv[]) {
 
     sock_fd = socket(AF_INET, SOCK_STREAM, 0);
     int isockoptval=1;
- if(setsockopt(sock_fd,SOL_SOCKET,SO_REUSEADDR,&isockoptval,sizeof(isockoptval))==-1){
+    if(setsockopt(sock_fd,SOL_SOCKET,SO_REUSEADDR,&isockoptval,sizeof(isockoptval))==-1){
         perror("setsockopt fail\n");
         close(sock_fd);
         exit(EXIT_FAILURE);    
@@ -58,8 +58,6 @@ int main(int argc, char * argv[]) {
         ret = select(client_fd + 1, &readfdset, NULL, NULL, &timeout);
         if (ret < -1) {
             perror("select");
-        } else if (0 == ret) {
-            //printf("time is over\n");
         } else {
             if (FD_ISSET(client_fd, &readfdset)) {
                 bzero(message, sizeof(message));
