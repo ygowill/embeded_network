@@ -62,15 +62,17 @@ int main(int argc, char * argv[]) {
             if (FD_ISSET(client_fd, &readfdset)) {
                 bzero(message, sizeof(message));
                 ret = recv(client_fd, message, sizeof(message), 0);
-                if (0 == strncmp(message, "exit",4)) {
-                    printf("receive exit message from client.\n");
-                    break;
-                }
                 if (ret == 0) {
                     printf("connect break\n");
                     break;
                 }
-                printf(">>>%s", message);
+                if (0 == strncmp(message, "exit",4)) {
+                    printf("receive exit message from client.\n");
+                    break;
+                }
+                message[ret-1] = '\0';
+                printf(">>>%s\n", message);
+                fflush(NULL);
             }
             if (FD_ISSET(0, &readfdset)) {
                 ret = read(0, message, sizeof(message));
