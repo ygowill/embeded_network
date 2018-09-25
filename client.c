@@ -46,15 +46,12 @@ int main(int argc, char * argv[]) {
             perror("select");
         } else {
             if (FD_ISSET(0, &readfdset)) {
+                bzero(message, sizeof(message));
                 ret = read(0, message, sizeof(message));
                 if (ret < 0) {
                     perror("read");
                 }
                 send(sock_fd, message, strlen(message), 0);
-                if (0 == strncmp(message, "exit", 4)) {
-                    printf("receive exit message from server\n");
-                    break;
-                }
             }
             if (FD_ISSET(sock_fd, &readfdset)) {
                 bzero(message, sizeof(message));
@@ -65,6 +62,7 @@ int main(int argc, char * argv[]) {
                 } else {
                     message[ret-1] = '\0';
                     printf(">>>%s\n", message);
+                    fflush(NULL);
                 }
             }
         }
