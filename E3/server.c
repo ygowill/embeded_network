@@ -10,7 +10,7 @@
 #include <arpa/inet.h>
 
 #define MAX_CONN 10
-#define MAX_MESSAGE_LEN 1024
+#define MAX_MESSAGE_LEN 200
 
 int fd_arr[MAX_CONN];
 
@@ -73,8 +73,8 @@ void Server(char* ip,char* port){
 
     ret = listen(sock_fd, 5);
 
-    timeout.tv_sec = 5;
-    timeout.tv_usec = 5000000;
+    timeout.tv_sec = 60;
+    timeout.tv_usec = 60000000;
     printf("server ready\n\n\n");
 
 
@@ -98,11 +98,21 @@ void Server(char* ip,char* port){
         }
         else{
             for(int i=0;i<MAX_CONN;i++) {
+                if(FD_ISSET(0,&readfdset)){
+                    char buf[MAX_MESSAGE_LEN];
+                    bzero(buf,sizeof(buf));
+                    ret = read(0, buf, sizeof(buf));
+                    if (ret < 0) {
+                        perror("read");
+                    }
+                    if(strncmp(buf,"exit",4)==0)
+                        return 0;
+                }
                 if(i==0&&fd_arr[i]!=-1&&FD_ISSET(fd_arr[i],&readfdset)){
                     socklen_t len=sizeof(clientaddr);
                     int new_fd=accept(sock_fd,(struct sockaddr*)&clientaddr,&len);
                     if(-1!=new_fd){
-                        printf("get a new link from [%s]\n",inet_ntoa(clientaddr.sin_addr));
+                        printf("get a new link from [%s](fd:%d)\n",inet_ntoa(clientaddr.sin_addr),new_fd);
                         if(-1 == addFD(new_fd)){
                             perror("fd_arr is full,close new_fd\n");
                             close(new_fd);
@@ -113,10 +123,11 @@ void Server(char* ip,char* port){
                 }
                 if(fd_arr[i]!=-1&&FD_ISSET(fd_arr[i],&readfdset)){
                     char buf[MAX_MESSAGE_LEN];
-                    memset(buf,'\0',sizeof(buf));
-                    ssize_t size=recv(fd_arr[i],buf,sizeof(buf)-1,0);
+                    bzero(buf,sizeof(buf));
+                    ssize_t size=recv(fd_arr[i],buf,sizeof(buf),0);
+                    buf[size-1]='\0';
                     if(size==0||size==-1){
-                        printf("remote client close,size is%d\n",size);
+                        printf("remote client(fd:%d) close\n",fd_arr[i]);
                         for(int j=0;j<MAX_CONN;++j){
                             if(fd_arr[j]==fd_arr[i]){
                                 fd_arr[j]=-1;
@@ -126,6 +137,13 @@ void Server(char* ip,char* port){
                         close(fd_arr[i]);
                         FD_CLR(fd_arr[i],&readfdset);
                     } else {
+                        if(strncmp(buf,"exit",4)==0){
+                            close(fd_arr[i]);
+                            FD_CLR(fd_arr[i],&readfdset);
+                            printf("remote client(fd:%d) close\n",fd_arr[i]);
+                            fd_arr[i]=-1;
+                            break;  
+                        }
                         send(fd_arr[i],buf, sizeof(buf),0);
                         printf("fd:%d,msg:%s\n",fd_arr[i],buf);
                     }

@@ -9,6 +9,8 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 
+#define MAX_MESSAGE_LEN 200
+
 int main(int argc, char * argv[]) {
     if(argc<3){
         printf("missing parameter\n");
@@ -24,7 +26,7 @@ int main(int argc, char * argv[]) {
     struct sockaddr_in clientaddr;
     struct in_addr inaddr;
     int addrlen = sizeof(clientaddr);
-    char message[200];
+    char message[MAX_MESSAGE_LEN];
     addr.sin_family = AF_INET;
     addr.sin_port = htons(atoi(argv[2]));
     ret = inet_aton(argv[1], &inaddr);
@@ -36,8 +38,8 @@ int main(int argc, char * argv[]) {
     bzero(message, sizeof(message));
     printf("client ready\n\n\n");
     while (1) {
-        timeout.tv_sec = 5;
-        timeout.tv_usec = 5000000;
+        timeout.tv_sec = 60;
+        timeout.tv_usec = 60000000;
         FD_ZERO(&readfdset);
         FD_SET(sock_fd, &readfdset);
         FD_SET(0, &readfdset);
@@ -55,6 +57,9 @@ int main(int argc, char * argv[]) {
                     perror("read");
                 }
                 send(sock_fd, message, strlen(message), 0);
+                if(strncmp(message,"exit",4)==0){
+                    return 0;
+                }
             }
             if (FD_ISSET(sock_fd, &readfdset)) {
                 bzero(message, sizeof(message));
