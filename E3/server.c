@@ -9,15 +9,38 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 
-int main(int argc, char * argv[]) {
-    if(argc<3){
-        printf("missing parameter\n");
-        return 0;
+#define MAX_CONN 10
+#define MAX_MESSAGE_LEN 1024
+
+int fd_arr[MAX_CONN];
+
+void initFdArr(){
+    for(int i=0;i<MAX_CONN;i++){
+        fd_arr[i]=-1;
     }
-    printf("initialize server...\n");
+}
+
+int addFD(int fd){
+    for(int i=0;i<MAX_CONN;i++){
+        if(fd_arr[i]==-1){
+            fd_arr[i] = fd;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+void clear_conn(){
+    for(int i=0;i<MAX_CONN;i++){
+        if(fd_arr[i]!=-1){
+            close(fd_arr[i]);
+        }
+    }
+}
+
+void Server(char* ip,char* port){
     int sock_fd;
-    int client_fd;
-    int maxfd;
+    int maxfd=-1;
     int ret;
     fd_set readfdset;
     struct timeval timeout;
@@ -25,66 +48,102 @@ int main(int argc, char * argv[]) {
     struct sockaddr_in clientaddr;
     struct in_addr inaddr;
     int addrlen = sizeof(clientaddr);
-    char message[200];
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(atoi(argv[2]));
-    ret = inet_aton(argv[1], &inaddr);
+    addr.sin_port = htons(atoi(port));
+    ret = inet_aton(ip, &inaddr);
     addr.sin_addr = inaddr;
 
+    initFdArr();
     sock_fd = socket(AF_INET, SOCK_STREAM, 0);
+    addFD(sock_fd);
+    addFD(0);
+
     int isockoptval=1;
     if(setsockopt(sock_fd,SOL_SOCKET,SO_REUSEADDR,&isockoptval,sizeof(isockoptval))==-1){
         perror("setsockopt fail\n");
         close(sock_fd);
-        exit(EXIT_FAILURE);    
+        exit(EXIT_FAILURE);
     }
+
     ret = bind(sock_fd, (struct sockaddr *) &addr, sizeof(addr));
     if (ret < 0) {
         perror("bind");
         exit(-1);
     }
-    printf("server ready\n\n\n");
+
     ret = listen(sock_fd, 5);
+
     timeout.tv_sec = 5;
     timeout.tv_usec = 5000000;
-    client_fd = accept(sock_fd, (struct sockaddr *) &clientaddr, &addrlen);
-    bzero(message, sizeof(message));
+    printf("server ready\n\n\n");
+
 
     while (1) {
         FD_ZERO(&readfdset);
-        FD_SET(client_fd, &readfdset);
-        FD_SET(0, &readfdset);
-        maxfd = (client_fd > sock_fd) ? client_fd : sock_fd;
-        ret = select(client_fd + 1, &readfdset, NULL, NULL, &timeout);
-        if (ret < -1) {
-            perror("select");
-        } else {
-            if (FD_ISSET(client_fd, &readfdset)) {
-                bzero(message, sizeof(message));
-                ret = recv(client_fd, message, sizeof(message), 0);
-                if (ret == 0) {
-                    printf("connect break\n");
-                    break;
+        for(int i=0;i<MAX_CONN;++i) {
+            if (fd_arr[i] != -1) {
+                FD_SET(fd_arr[i], &readfdset);
+                if (fd_arr[i] > maxfd) {
+                    maxfd = fd_arr[i];
                 }
-                if (0 == strncmp(message, "exit",4)) {
-                    printf("receive exit message from client.\n");
-                    break;
-                }
-                message[ret-1] = '\0';
-                printf(">>>%s\n", message);
-                fflush(NULL);
             }
-            if (FD_ISSET(0, &readfdset)) {
-                ret = read(0, message, sizeof(message));
-                if (ret < 0) {
-                    perror("read");
-                } else {
-                    message[ret] = '\0';
+        }
+
+        ret = select(maxfd + 1, &readfdset, NULL, NULL, &timeout);
+        if (ret == -1) {
+            perror("select");
+        } else if(ret == 0) {
+            printf("select timeout......");
+            break;
+        }
+        else{
+            for(int i=0;i<MAX_CONN;i++) {
+                if(i==0&&fd_arr[i]!=-1&&FD_ISSET(fd_arr[i],&readfdset)){
+                    socklen_t len=sizeof(clientaddr);
+                    int new_fd=accept(sock_fd,(struct sockaddr*)&clientaddr,&len);
+                    if(-1!=new_fd){
+                        printf("get a new link from [%s]\n",inet_ntoa(clientaddr.sin_addr));
+                        if(-1 == addFD(new_fd)){
+                            perror("fd_arr is full,close new_fd\n");
+                            close(new_fd);
+                        }
+
+                    }
+                    continue;
                 }
-                send(client_fd, message, strlen(message), 0);
+                if(fd_arr[i]!=-1&&FD_ISSET(fd_arr[i],&readfdset)){
+                    char buf[MAX_MESSAGE_LEN];
+                    memset(buf,'\0',sizeof(buf));
+                    ssize_t size=recv(fd_arr[i],buf,sizeof(buf)-1,0);
+                    if(size==0||size==-1){
+                        printf("remote client close,size is%d\n",size);
+                        for(int j=0;j<MAX_CONN;++j){
+                            if(fd_arr[j]==fd_arr[i]){
+                                fd_arr[j]=-1;
+                                break;
+                            }
+                        }
+                        close(fd_arr[i]);
+                        FD_CLR(fd_arr[i],&readfdset);
+                    } else {
+                        send(fd_arr[i],buf, sizeof(buf),0);
+                        printf("fd:%d,msg:%s\n",fd_arr[i],buf);
+                    }
+                }
             }
         }
     }
-    close(client_fd);
+
+    clear_conn();
     close(sock_fd);
+}
+
+int main(int argc, char * argv[]) {
+    if(argc<3){
+        printf("missing parameter\n");
+        return 0;
+    }
+    printf("initialize server...\n");
+    Server(argv[1],argv[2]);
+    return 0;
 }

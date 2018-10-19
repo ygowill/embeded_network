@@ -42,8 +42,11 @@ int main(int argc, char * argv[]) {
         FD_SET(sock_fd, &readfdset);
         FD_SET(0, &readfdset);
         ret = select(sock_fd + 1, &readfdset, NULL, NULL, &timeout);
-        if (ret < 0) {
+        if (ret == -1) {
             perror("select");
+        } else if(ret == 0) {
+            printf("select timeout......");
+            break;
         } else {
             if (FD_ISSET(0, &readfdset)) {
                 bzero(message, sizeof(message));
