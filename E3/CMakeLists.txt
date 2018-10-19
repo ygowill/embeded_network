@@ -3,4 +3,4 @@ project(embeded_network C)
 
 set(CMAKE_C_STANDARD 99)
 
-add_executable(embeded_network server.c)
+add_executable(embeded_network server.c client.c)

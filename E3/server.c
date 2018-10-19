@@ -106,7 +106,7 @@ void Server(char* ip,char* port){
                         perror("read");
                     }
                     if(strncmp(buf,"exit",4)==0)
-                        return 0;
+                        exit(0);
                 }
                 if(i==0&&fd_arr[i]!=-1&&FD_ISSET(fd_arr[i],&readfdset)){
                     socklen_t len=sizeof(clientaddr);
