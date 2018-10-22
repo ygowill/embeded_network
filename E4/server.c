@@ -15,15 +15,17 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-void sigChildFun(int signal) {
+#define MAX_MESSAGE_LEN 200
+
+void sigChildFun(int sig) {
     pid_t pid;
     int   stat;
-    while ((pid = waitpid(-1, &stat, WNOHANG)) > 0) { // 循环等待进程结束, 此时waitpid不会阻塞
-        NULL;
-    }
+    while ((pid = waitpid(-1, &stat, WNOHANG)) > 0) {
+    } // 避免僵尸进程
 
     return;
 }
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         perror("missing parameter!");
@@ -46,8 +48,8 @@ int main(int argc, char** argv) {
         socklen_t          iSize = sizeof(clientAddr);
         memset(&clientAddr, 0, sizeof(clientAddr));
 
-        int iConnSocket = accept(listen_socket, ( struct sockaddr* )&clientAddr, &iSize);
-        if (iConnSocket < 0) {
+        int conn_socket = accept(listen_socket, ( struct sockaddr* )&clientAddr, &iSize);
+        if (conn_socket < 0) {
             if (errno == EINTR || errno == ECONNABORTED) {
                 continue;
             }
@@ -62,22 +64,32 @@ int main(int argc, char** argv) {
             close(listen_socket); // 子进程让监听socket的计数减1,
                                   // 并非直接关闭监听socket
 
-            char szBuf[1024] = { 0 };
-            snprintf(szBuf, sizeof(szBuf), "server pid[%u], client ip[%s]", getpid(), inet_ntoa(clientAddr.sin_addr));
-            write(iConnSocket, szBuf, strlen(szBuf) + 1);
+            char buf[MAX_MESSAGE_LEN] = { 0 };
+            snprintf(buf, sizeof(buf), "server pid[%u], client ip[%s]", getpid(), inet_ntoa(clientAddr.sin_addr));
+            write(conn_socket, buf, strlen(buf) + 1);
 
             while (1) {
-                if (read(iConnSocket, szBuf, 1) <= 0) {
-                    close(iConnSocket); // 子进程让通信的socket计数减1
+                if (read(conn_socket, buf, sizeof(buf)) < 0) {
+                    close(conn_socket); // 子进程让通信的socket计数减1
                     return -2;          // 子进程退出
+                }
+                else {
+                    if(strncmp("exit",buf,4)==0){
+                        break;
+                    }
+                    printf("get message \"%s\" from socket %d\n",buf,conn_socket);
+                    send(conn_socket, buf, sizeof(buf), 0);
                 }
             }
 
-            close(iConnSocket); // 子进程让通信的socket计数减1
+            close(conn_socket); // 子进程让通信的socket计数减1
             return 0;           // 子进程退出
         }
+        else {
+            printf("new connection.");
+        }
 
-        close(iConnSocket); // 父进程让通信的socket计数减1
+        close(conn_socket); // 父进程让通信的socket计数减1
     }
 
     close(listen_socket); // 父进程让监听socket计数减1,
