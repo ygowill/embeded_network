@@ -1,124 +1,92 @@
 #include <arpa/inet.h>
-#include <ctype.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <netdb.h>
 #include <netinet/in.h>
-#include <signal.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/ioctl.h>
 #include <sys/socket.h>
-#include <sys/types.h>
-#include <sys/wait.h>
 #include <unistd.h>
 
-#define MAX_MESSAGE_LEN 200
+int main(int argc, char* argv[]) {
+    unsigned short port = 8080; // 本地端口
 
-void sigChildFun(int sig) {
-    pid_t pid;
-    int   stat;
-    while ((pid = waitpid(-1, &stat, WNOHANG)) > 0) {
-    } // 避免僵尸进程
-
-    return;
-}
-
-int main(int argc, char** argv) {
-    if (argc < 2) {
-        perror("missing parameter!");
-        return 1;
-    }
-    struct sockaddr_in servAddr;
-    memset(&servAddr, 0, sizeof(servAddr));
-    servAddr.sin_family      = AF_INET;
-    servAddr.sin_addr.s_addr = INADDR_ANY;
-    servAddr.sin_port        = htons(atoi(argv[1]));
-
-    int listen_socket = socket(AF_INET, SOCK_STREAM, 0);
-    bind(listen_socket, ( struct sockaddr* )&servAddr, sizeof(servAddr));
-    listen(listen_socket, 5);
-
-    signal(SIGCHLD, sigChildFun);
-    fd_set         readfdset;
-    struct timeval timeout;
-    timeout.tv_sec  = 60;
-    timeout.tv_usec = 60000000;
-    printf("server ready.\n\n");
-
-    while (1) {
-        struct sockaddr_in clientAddr;
-        socklen_t          iSize = sizeof(clientAddr);
-        memset(&clientAddr, 0, sizeof(clientAddr));
-
-        int conn_socket = accept(listen_socket, ( struct sockaddr* )&clientAddr, &iSize);
-        if (conn_socket < 0) {
-            if (errno == EINTR || errno == ECONNABORTED) {
-                continue;
-            }
-            else {
-                printf("accept error\n");
-                return -1;
-            }
-        }
-        else {
-            printf("new connection from [%s]\n", inet_ntoa(clientAddr.sin_addr));
-        }
-
-        int tmpPid = fork();
-        if (tmpPid == 0) {
-            close(listen_socket); // 子进程让监听socket的计数减1,
-                                  // 并非直接关闭监听socket
-
-            char buf[MAX_MESSAGE_LEN] = { 0 };
-            snprintf(buf, sizeof(buf), "server pid[%u], client ip[%s]", getpid(), inet_ntoa(clientAddr.sin_addr));
-            write(conn_socket, buf, strlen(buf) + 1);
-
-            int ret = 0;
-            while (1) {
-                bzero(buf, sizeof(buf));
-                ret          = ( int )read(conn_socket, buf, sizeof(buf));
-                buf[ret - 1] = '\0';
-                if (ret < 0) {
-                    perror("read error");
-                    printf("socket %d closed, child process exit\n", conn_socket);
-                    close(conn_socket); // 子进程让通信的socket计数减1
-                    return -2;          // 子进程退出
-                }
-                else {
-                    if (strncmp("exit", buf, 4) == 0) {
-                        printf("receive exit from client, close child process\n");
-                        break;
-                    }
-                    printf("get message \"%s\"\n", buf);
-                    send(conn_socket, buf, sizeof(buf), 0);
-                }
-            }
-
-            close(conn_socket); // 子进程让通信的socket计数减1
-            return 0;           // 子进程退出
-        } else{
-            char buf[MAX_MESSAGE_LEN] = { 0 };
-            int ret = read(0, buf, sizeof(buf));
-            if (ret < 0) {
-                perror("read");
-            }
-            else {
-                buf[ret] = '\0';
-            }
-            if(strncmp(buf,"exit",4)==0){
-                close(conn_socket);
-                close(listen_socket);
-                return 0;
-            }
-        }
-
-        close(conn_socket); // 父进程让通信的socket计数减1
+    // 创建tcp套接字
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0) {
+        perror("socket");
+        exit(-1);
     }
 
-    close(listen_socket); // 父进程让监听socket计数减1,
-                          // 此时会关掉监听socket(因为之前子进程已经有此操作)
+    //配置本地网络信息
+    struct sockaddr_in my_addr;
+    bzero(&my_addr, sizeof(my_addr));
+    my_addr.sin_family      = AF_INET;
+    my_addr.sin_port        = htons(port);
+    my_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+    // 2.绑定
+    int ret = bind(sockfd, ( struct sockaddr* )&my_addr, sizeof(my_addr));
+    if (ret != 0) {
+        perror("binding");
+        close(sockfd);
+        exit(-1);
+    }
+
+    // 3.监听，套接字变被动
+    ret = listen(sockfd, 5);
+    if (ret != 0) {
+        perror("listen");
+        close(sockfd);
+        exit(-1);
+    }
+
+    while (1) { //主进程 循环等待客户端的连接
+        char               cli_ip[INET_ADDRSTRLEN] = { 0 };
+        struct sockaddr_in client_addr;
+        socklen_t          cliaddr_len = sizeof(client_addr);
+
+        // 取出客户端已完成的连接
+        int connfd = accept(sockfd, ( struct sockaddr* )&client_addr, &cliaddr_len);
+        if (connfd < 0) {
+            perror("accept");
+            close(sockfd);
+            exit(-1);
+        }
+
+        pid_t pid = fork();
+        if (pid < 0) {
+            perror("fork");
+            _exit(-1);
+        }
+        else if (0 == pid) { //子进程 接收客户端的信息，并发还给客户端
+            close(sockfd); // 关闭监听套接字
+
+            char recv_buf[1024] = { 0 };
+            int  recv_len       = 0;
+
+            // 打印客户端的 ip 和端口
+            memset(cli_ip, 0, sizeof(cli_ip)); // 清空
+            inet_ntop(AF_INET, &client_addr.sin_addr, cli_ip, INET_ADDRSTRLEN);
+            printf("client ip=%s,port=%d\n", cli_ip, ntohs(client_addr.sin_port));
+
+            // 接收数据
+            while ((recv_len = recv(connfd, recv_buf, sizeof(recv_buf), 0)) > 0) {
+                if(strncmp(recv_buf,"exit",4)==0){
+                    break;
+                }
+                printf("recv_buf: %s\n", recv_buf);  // 打印数据
+                send(connfd, recv_buf, recv_len, 0); // 给客户端回数据
+            }
+
+            printf("client_port %d closed!\n", ntohs(client_addr.sin_port));
+            close(connfd); //关闭已连接套接字
+            exit(0);
+        }
+        else if (pid > 0) { // 父进程
+            close(connfd);  //关闭已连接套接字
+        }
+    }
+
+    close(sockfd);
+
     return 0;
 }
