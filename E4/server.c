@@ -99,6 +99,20 @@ int main(int argc, char** argv) {
 
             close(conn_socket); // 子进程让通信的socket计数减1
             return 0;           // 子进程退出
+        } else{
+            char buf[MAX_MESSAGE_LEN] = { 0 };
+            int ret = read(0, buf, sizeof(buf));
+            if (ret < 0) {
+                perror("read");
+            }
+            else {
+                buf[ret] = '\0';
+            }
+            if(strncmp(buf,"exit",4)==0){
+                close(conn_socket);
+                close(listen_socket);
+                return 0;
+            }
         }
 
         close(conn_socket); // 父进程让通信的socket计数减1
