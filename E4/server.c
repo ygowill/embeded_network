@@ -59,6 +59,10 @@ int main(int argc, char** argv) {
                 return -1;
             }
         }
+        else {
+            printf("new connection from [%s]\n",inet_ntoa(clientAddr.sin_addr));
+        }
+
 
         int tmpPid = fork();
         if (tmpPid == 0) {
@@ -73,6 +77,7 @@ int main(int argc, char** argv) {
             while (1) {
                 bzero(buf, sizeof(buf));
                 ret = ( int )read(conn_socket, buf, sizeof(buf));
+                buf[ret-1]='\0';
                 if (ret < 0) {
                     perror("read error");
                     printf("socket %d closed, child process exit\n", conn_socket);
@@ -81,9 +86,10 @@ int main(int argc, char** argv) {
                 }
                 else {
                     if (strncmp("exit", buf, 4) == 0) {
+                        printf("receive exit from client, close child process\n");
                         break;
                     }
-                    printf("get message \"%s\" from socket %d\n", buf, conn_socket);
+                    printf("get message \"%s\"\n", buf);
                     send(conn_socket, buf, sizeof(buf), 0);
                 }
             }
