@@ -27,6 +27,13 @@ int main(int argc, char* argv[]) {
     my_addr.sin_port        = htons(port);
     my_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
+    int isockoptval = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &isockoptval, sizeof(isockoptval)) == -1) {
+        perror("setsockopt fail\n");
+        close(sockfd);
+        exit(EXIT_FAILURE);
+    }
+
     int ret = bind(sockfd, ( struct sockaddr* )&my_addr, sizeof(my_addr));
     if (ret != 0) {
         perror("binding");
