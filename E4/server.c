@@ -42,6 +42,7 @@ int main(int argc, char** argv) {
     listen(listen_socket, 5);
 
     signal(SIGCHLD, sigChildFun);
+    printf("server ready.\n\n");
 
     while (1) {
         struct sockaddr_in clientAddr;
@@ -68,16 +69,21 @@ int main(int argc, char** argv) {
             snprintf(buf, sizeof(buf), "server pid[%u], client ip[%s]", getpid(), inet_ntoa(clientAddr.sin_addr));
             write(conn_socket, buf, strlen(buf) + 1);
 
+            int ret = 0;
             while (1) {
-                if (read(conn_socket, buf, sizeof(buf)) < 0) {
+                bzero(buf, sizeof(buf));
+                ret = ( int )read(conn_socket, buf, sizeof(buf));
+                if (ret < 0) {
+                    perror("read error");
+                    printf("socket %d closed, child process exit\n", conn_socket);
                     close(conn_socket); // 子进程让通信的socket计数减1
                     return -2;          // 子进程退出
                 }
                 else {
-                    if(strncmp("exit",buf,4)==0){
+                    if (strncmp("exit", buf, 4) == 0) {
                         break;
                     }
-                    printf("get message \"%s\" from socket %d\n",buf,conn_socket);
+                    printf("get message \"%s\" from socket %d\n", buf, conn_socket);
                     send(conn_socket, buf, sizeof(buf), 0);
                 }
             }
