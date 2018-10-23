@@ -67,7 +67,7 @@ int main(int argc, char* argv[]) {
                 bzero(message, sizeof(message));
                 ret = recv(sock_fd, message, sizeof(message), 0);
                 if (0 == ret) {
-                    printf("server not in work\n");
+                    printf("server offline\n");
                     break;
                 }
                 else {

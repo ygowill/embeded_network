@@ -38,7 +38,7 @@ void clear_conn() {
     }
 }
 
-void Server(char* ip, char* port) {
+void Server(char* port) {
     int                sock_fd;
     int                maxfd = -1;
     int                ret;
@@ -50,8 +50,7 @@ void Server(char* ip, char* port) {
     int                addrlen = sizeof(clientaddr);
     addr.sin_family            = AF_INET;
     addr.sin_port              = htons(atoi(port));
-    ret                        = inet_aton(ip, &inaddr);
-    addr.sin_addr              = inaddr;
+    addr.sin_addr.s_addr       = htonl(INADDR_ANY);
 
     initFdArr();
     sock_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -145,7 +144,7 @@ void Server(char* ip, char* port) {
                             break;
                         }
                         send(fd_arr[i], buf, sizeof(buf), 0);
-                        printf("fd:%d,msg:%s\n", fd_arr[i], buf);
+                        printf("message from client[fd:%d]>>>%s\n", fd_arr[i], buf);
                     }
                 }
             }
@@ -157,11 +156,11 @@ void Server(char* ip, char* port) {
 }
 
 int main(int argc, char* argv[]) {
-    if (argc < 3) {
-        printf("missing parameter\n");
+    if (argc != 2) {
+        printf("wrong parameter!\n");
         return 0;
     }
     printf("initialize server...\n");
-    Server(argv[1], argv[2]);
+    Server(argv[1]);
     return 0;
 }

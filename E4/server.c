@@ -5,6 +5,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #define MAX_MESSAGE_LEN 200
 
@@ -47,11 +48,43 @@ int main(int argc, char* argv[]) {
         close(sockfd);
         exit(-1);
     }
+    
+    fd_set             readfdset;
+    struct timeval     timeout;
+    timeout.tv_sec  = 0;
+    timeout.tv_usec = 0;
 
     while (1) { //主进程 循环等待客户端的连接
         char               cli_ip[INET_ADDRSTRLEN] = { 0 };
         struct sockaddr_in client_addr;
         socklen_t          cliaddr_len = sizeof(client_addr);
+        char recv_buf[MAX_MESSAGE_LEN] = { 0 };
+        int  recv_len                  = 0;
+        
+        FD_ZERO(&readfdset);
+            FD_SET(0, &readfdset);
+            ret   = select(0 + 1, &readfdset, NULL, NULL, &timeout);
+            if (ret < 0) {
+                perror("select");
+            }
+            else if(ret == 0){
+                continue;
+            }
+            else {
+                if (FD_ISSET(0, &readfdset)) {
+                    recv_len = read(0, recv_buf, sizeof(recv_buf));
+                    if (recv_len < 0) {
+                        perror("read");
+                    }
+                    else {
+                        recv_buf[recv_len] = '\0';
+                    }
+                    if(strncmp(recv_buf,"exit",4)==0){
+                        close(sockfd);
+                        exit(0);
+                    }
+                }
+            }
 
         // 取出客户端已完成的连接
         int connfd = accept(sockfd, ( struct sockaddr* )&client_addr, &cliaddr_len);
@@ -68,9 +101,6 @@ int main(int argc, char* argv[]) {
         }
         else if (0 == pid) { //子进程 接收客户端的信息，并发还给客户端
             close(sockfd); // 关闭监听套接字
-
-            char recv_buf[MAX_MESSAGE_LEN] = { 0 };
-            int  recv_len                  = 0;
 
             // 打印客户端的 ip 和端口
             memset(cli_ip, 0, sizeof(cli_ip)); // 清空
@@ -93,13 +123,7 @@ int main(int argc, char* argv[]) {
         }
         else if (pid > 0) { // 父进程
             close(connfd);  //关闭已连接套接字
-            char recv_buf[MAX_MESSAGE_LEN] = { 0 };
-            int  recv_len                  = 0;
-            recv_len = recv(connfd, recv_buf, sizeof(recv_buf), 0);
-            if(strncmp(recv_buf,"exit",4)==0){
-                close(sockfd);
-                exit(0);
-            }
+            
         }
     }
     close(sockfd);
