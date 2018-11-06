@@ -8,6 +8,7 @@
 
 #define MAX_MESSAGE_LEN 200
 
+typedef int ;
 int main(int argc, char* argv[]) {
     if (argc != 2) {
         perror("wrong parameters!\n");
@@ -110,7 +111,6 @@ int main(int argc, char* argv[]) {
             }
             if (FD_ISSET(0, &readfdset)) {
                 char recv_buf[MAX_MESSAGE_LEN] = { 0 };
-                int  recv_len                  = read(0, recv_buf, sizeof(recv_buf));
                 if (strncmp(recv_buf, "exit", 4) == 0) {
                     close(sockfd);
                     exit(0);
