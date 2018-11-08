@@ -1,22 +1,26 @@
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <termios.h>
+#include <unistd.h>
 
 //定义波特率
 #define BAUDRATE B115200
-#define MODEMDEVICE "/dev/ttys0"
 
 #define FALSE 0
 #define TRUE 1
 
 volatile int STOP = FALSE;
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc != 2) {
+        perror("wrong parameters");
+        exit(1);
+    }
+    char* const    DEVICE = argv[1];
     int            fd, c, res;
     struct termios oldtio, newtio;
     char           buf[255];
@@ -24,7 +28,7 @@ int main() {
     struct timeval timeout;
     int            ret;
 
-    fd = open(MODEMDEVICE, O_RDWR | O_NOCTTY);
+    fd = open(DEVICE, O_RDWR | O_NOCTTY);
     if (fd < 0) {
         perror("打开串口失败");
         exit(-1);
